@@ -3,10 +3,13 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
 using DNS.Packet;
 using DNS.Packet.Enum;
 using DNS.Packet.Serializable;
 using DNS.Storage;
+using DNS.Config;
+using DNS.Config.Record;
 
 using log4net;
 using YamlDotNet.Serialization;
