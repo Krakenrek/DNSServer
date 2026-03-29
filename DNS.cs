@@ -1,13 +1,16 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 using DNS.Packet;
 using DNS.Packet.Enum;
 using DNS.Packet.Serializable;
 using DNS.Storage;
 
-using YamlDotNet.Serialization;  
+using log4net;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace DNS;
 
@@ -17,7 +20,6 @@ public class DNSServer : IDisposable
     #region Constants
 
     private const string ConfigPath = "config.yaml";
-    private const string LogPath = "dns.log";
 
     #endregion
     
@@ -31,9 +33,11 @@ public class DNSServer : IDisposable
 
     private readonly CancellationTokenSource _cts = new();
     
-    private readonly Logger _logger = new(LogPath);
-    private readonly Thread? _listenThread;
+    private readonly ILog _logger = LogManager.GetLogger(typeof(DNSServer));
+    private readonly Task? _listenerTask;
     private UdpClient? _udpClient;
+    
+    private readonly Lock _configLock = new();
     
     #endregion
 
@@ -44,12 +48,7 @@ public class DNSServer : IDisposable
         SetupHandlers();
         LoadConfig();
         
-        _listenThread = new Thread(() => ListenAsync(port)) 
-        { 
-            IsBackground = true, 
-            Name = "DNS Listener Thread" 
-        };
-        _listenThread.Start();
+        _listenerTask = Task.Run(() => ListenAsync(port));
     }
         
     #endregion
@@ -97,113 +96,205 @@ public class DNSServer : IDisposable
 
     private void LoadConfig()
     {
-        _records.Clear();
-        _authoritativeZones.Clear();
-        
-        try
+        lock (_configLock)
         {
-            var deserializer = new DeserializerBuilder().Build();
-            var yaml = File.ReadAllText(ConfigPath);
-            var config = deserializer.Deserialize<DNSConfig>(yaml);
+            _records.Clear();
+            _authoritativeZones.Clear();
 
-            if (config?.Zones == null || config.Zones.Count == 0) return;
-
-            foreach (var zone in config.Zones.Where(zone => !string.IsNullOrWhiteSpace(zone.Domain)))
+            try
             {
-                _authoritativeZones.Add(zone.Domain);
-                
-                var soaRecord = new DNSResourceRecord(
-                    zone.Domain, 
-                    DNSType.SOA, 
-                    DNSClass.IN, 
-                    zone.SOA.Minimum, 
-                    DNSHelper.CreateSOARData(
-                        zone.SOA.MName,
-                        zone.SOA.RName,
-                        zone.SOA.Serial,
-                        zone.SOA.Refresh,
-                        zone.SOA.Retry,
-                        zone.SOA.Expire,
-                        zone.SOA.Minimum
-                        )
-                    );
-                
-                _records.Add(zone.Domain, soaRecord);
+                var deserializer = new DeserializerBuilder()
+                    .WithNamingConvention(NullNamingConvention.Instance)
+                    .Build();
 
-                foreach (var nsRecord in
-                         from ns 
-                         in zone.NSRecords
-                         where !string.IsNullOrWhiteSpace(ns)
-                         select DNSHelper.CreateNameRData(ns)
-                         into nsData
-                         select new DNSResourceRecord(
-                             zone.Domain,
-                             DNSType.NS,
-                             DNSClass.IN,
-                             3600,
-                             nsData
-                             )
-                         )
+                var yaml = File.ReadAllText(ConfigPath);
+                
+                var config = deserializer.Deserialize<DNSConfig?>(yaml);
+                
+                if (config?.Zones is null || config.Zones.Count == 0)
                 {
-                    _records.Add(zone.Domain, nsRecord);
+                    _logger.Warn("No zones found in YAML configuration - server will be empty.");
+                    return;
                 }
                 
-                foreach (var rec in 
-                         zone.ARecords.Where(
-                             rec => 
-                                 !string.IsNullOrWhiteSpace(rec.Name) && 
-                                 !string.IsNullOrWhiteSpace(rec.Value)
-                                 )
-                         )
+                var zones = config.Zones!;
+
+                foreach (var zone in zones)
                 {
-                    var name = DNSHelper.GetFullQName(rec.Name, zone.Domain);
+                    if (string.IsNullOrWhiteSpace(zone.Domain))
+                    {
+                        _logger.Warn("While parsing config encountered zone without domain, skipping");
+                        continue;
+                    }
+
+                    if (zone.Soa is null)
+                    {
+                        _logger.Warn("While parsing config encountered zone without SOA record, skipping");
+                        continue;
+                    }
+
+                    if (zone.NSRecords is null || zone.NSRecords!.Count == 0)
+                    {
+                        _logger.Warn("While parsing config encountered zone without NS records, skipping");
+                        continue;
+                    }
+
+                    _authoritativeZones.Add(zone.Domain);
+
                     _records.Add(
-                        name,
+                        zone.Domain,
                         new DNSResourceRecord(
-                            name,
-                            DNSType.A, 
+                            zone.Domain!,
+                            DNSType.SOA,
                             DNSClass.IN,
-                            rec.TTL,
-                            IPAddress.Parse(rec.Value).GetAddressBytes()
+                            zone.Soa!.Minimum!.Value,
+                            DNSHelper.CreateSOARData(
+                                zone.Soa!.MName!,
+                                zone.Soa!.RName!,
+                                zone.Soa!.Serial!.Value,
+                                zone.Soa!.Refresh!.Value,
+                                zone.Soa!.Retry!.Value,
+                                zone.Soa!.Expire!.Value,
+                                zone.Soa!.Minimum!.Value
+                            )
                         )
                     );
-                }
-                
-                foreach (var rec in 
-                         zone.AAAARecords.Where(
-                             rec => 
-                                 !string.IsNullOrWhiteSpace(rec.Name) && 
-                                 !string.IsNullOrWhiteSpace(rec.Value)
-                                 )
-                         )
-                {
-                    var name = DNSHelper.GetFullQName(rec.Name, zone.Domain);
-                    _records.Add(
-                        name,
-                        new DNSResourceRecord(
-                                name,
-                                DNSType.AAAA, 
-                                DNSClass.IN,
-                                rec.TTL,
-                                IPAddress.Parse(rec.Value).GetAddressBytes()
+
+                    _records.AddRange(
+                        zone.Domain,
+                        zone.NSRecords!
+                            .Select(DNSHelper.CreateNameRData)
+                            .Select(data =>
+                                new DNSResourceRecord(
+                                    zone.Domain,
+                                    DNSType.NS,
+                                    DNSClass.IN,
+                                    3600,
+                                    data
+                                )
                             )
-                        );
+                    );
+
+                    // ReSharper disable once InconsistentNaming
+                    var ARecordsLoaded = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
+
+                    // ReSharper disable once InconsistentNaming
+                    var AAAARecordsLoaded =
+                        LoadAAAARecords(zone.Domain, zone.AAAARecords ?? Enumerable.Empty<AAAARecord>());
+
+                    _logger.Info(
+                        $"Successfully loaded zone {zone.Domain} with {ARecordsLoaded} A records and {AAAARecordsLoaded} AAAA records.");
                 }
             }
-
-            Console.WriteLine($"Successfully loaded {config.Zones.Count} zone(s) from {ConfigPath}");
-        }
-        catch (Exception e)
-        {
-            Console.Error.WriteLine($"Failed to load YAML config at '{ConfigPath}'");
+            catch (Exception e)
+            {
+                _logger.Error("Encountered unexpected error while loading zones", e);
+            }
         }
     }
+
+    private int LoadARecords(string domain, IEnumerable<ARecord> records)
+    {
+        var loaded = 0;
+        
+        foreach (var record in records)
+        {
+            if (record.Name is null)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered A record without name, skipping");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(record.Value))
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered A record without value, skipping");
+                continue;
+            }
+
+            var name = DNSHelper.GetFullQName(record.Name!, domain);
+
+            if (!IPAddress.TryParse(record.Value!, out var address) ||
+                address!.AddressFamily != AddressFamily.InterNetwork
+               )
+            {
+                _logger.Warn(
+                    $"While parsing zone {record}, encountered A record with wrong value format, skipping");
+                continue;
+            }
+
+            _records.Add(
+                name,
+                new DNSResourceRecord(
+                    name,
+                    DNSType.A,
+                    DNSClass.IN,
+                    record.TTL,
+                    address.GetAddressBytes()
+                )
+            );
+            
+            loaded++;
+        }
+        
+        return loaded;
+    }
     
+    // ReSharper disable once InconsistentNaming
+    private int LoadAAAARecords(string domain, IEnumerable<AAAARecord> records)
+    {
+        var loaded = 0;
+        
+        foreach (var record in records)
+        {
+            if (record.Name is null)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered A record without name, skipping");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(record.Value))
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered A record without value, skipping");
+                continue;
+            }
+
+            var name = DNSHelper.GetFullQName(record.Name!, domain);
+
+            if (!IPAddress.TryParse(record.Value!, out var address) ||
+                address!.AddressFamily != AddressFamily.InterNetworkV6
+               )
+            {
+                _logger.Warn(
+                    $"While parsing zone {record}, encountered A record with wrong value format, skipping");
+                continue;
+            }
+
+            _records.Add(
+                name,
+                new DNSResourceRecord(
+                    name,
+                    DNSType.AAAA,
+                    DNSClass.IN,
+                    record.TTL,
+                    address.GetAddressBytes()
+                )
+            );
+            
+            loaded++;
+        }
+        
+        return loaded;
+    }
+
     #endregion
 
     #region Listening
 
-    private async void ListenAsync(int port)
+    private async Task ListenAsync(int port)
     { 
         try
         {
@@ -213,11 +304,19 @@ public class DNSServer : IDisposable
             {
                 try
                 {
-                    var result = await _udpClient.ReceiveAsync(_cts.Token);
+                    var result = await _udpClient.ReceiveAsync();
                     var data = result.Buffer;
                     _ = Task.Run(() => ProcessQuery(result.RemoteEndPoint, data), _cts.Token);
                 }
                 catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
                 {
                     break;
                 }
@@ -239,7 +338,7 @@ public class DNSServer : IDisposable
 
     private void ProcessQuery(IPEndPoint remoteEndPoint, byte[] data)
     {
-        const int maxPacketSize = 512;
+        const int maxPacketSize = 4096;
         
         try
         {
@@ -252,43 +351,47 @@ public class DNSServer : IDisposable
                 .SetAuthoritative()
                 .SetRecursionAvailable(false);
 
-            do
+            var question = query.Questions[0];
+
+            var isInZone = false;
+            
+            lock (_configLock)
             {
-                var question = query.Questions[0];
-                
-                var isInZone = _authoritativeZones.Any(
+                isInZone = _authoritativeZones.Any(
                     zone => 
                         question.Name.Equals(zone, StringComparison.OrdinalIgnoreCase) || 
                         question.Name.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase)
                 );
-
-                if (!isInZone)
-                {
-                    builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
-                    break;
-                }
-                
+            }
+            
+            if (!isInZone)
+            {
+                builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
+            }
+            else
+            {
                 var nameRecords = _records[question.Name];
 
                 if (nameRecords.Count == 0)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.DomainNotExist);
-                    break;
                 } 
-                
-                builder.AddAnswers(
-                    from record in nameRecords 
-                    where record.Type == question.Type 
-                    select record
+                else 
+                { 
+                    builder.AddAnswers(
+                        from record in nameRecords 
+                        where record.Type == question.Type 
+                        select record
                     );              
                 
-                builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
-                
-            } while (false);
+                    builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
+                }
+            }
             
             var responsePacket = builder.Build();
             
             Span<byte> buffer = stackalloc byte[maxPacketSize];
+            
             var offset = 0;
             
             responsePacket.Serialize(buffer, ref offset);
@@ -298,11 +401,18 @@ public class DNSServer : IDisposable
             
             _udpClient?.Send(response, offset, remoteEndPoint);
 
-            _logger.LogRequestResponse(query, responsePacket, remoteEndPoint);
+            var json = new
+            {
+                remoteEndPoint,
+                query,
+                response,
+            };
+            
+            _logger.Info($"Processed: {JsonSerializer.Serialize(json)}");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error processing packet: {ex.Message}");
+            _logger.Error($"Error processing packet: {ex.Message}", ex);
         }
     }
 
@@ -317,8 +427,7 @@ public class DNSServer : IDisposable
     
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        if (_disposed) return;
 
         _disposed = true;
 
@@ -326,9 +435,10 @@ public class DNSServer : IDisposable
 
         GC.SuppressFinalize(this);
         _cts.Cancel();
+        _udpClient?.Close();
         _udpClient?.Dispose();
         _cts.Dispose();
-        _listenThread?.Join(listenThreadTimeout);
+        _listenerTask?.Wait(listenThreadTimeout);
 
         _shutdownEvent.Set();
     }

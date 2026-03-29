@@ -25,6 +25,11 @@ public class SimpleRecordHolder<TKey, TRecord> : IDomainRecordHolder<TKey, TReco
         }
         records.Add(record);
     }
+
+    public void AddRange(TKey key, IEnumerable<TRecord> records)
+    {
+        foreach (var record in records) Add(key, record);
+    }
     
     public void Clear() => Records.Clear();
 }

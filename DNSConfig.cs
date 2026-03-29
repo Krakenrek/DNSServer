@@ -1,37 +1,69 @@
 // ReSharper disable CollectionNeverUpdated.Global
 // ReSharper disable ClassNeverInstantiated.Global
 // ReSharper disable InconsistentNaming
+
+using YamlDotNet.Serialization;
+
 namespace DNS;
 
 public class DNSConfig
 {
-    public List<ZoneConfig> Zones { get; set; } = [];
+    [YamlMember(Alias = "zones")]
+    public List<DNSZone>? Zones { get; set; } = [];
 }
 
-public class ZoneConfig
+public class DNSZone
 {
-    public string Domain { get; set; } = string.Empty;
-    public SOAConfig SOA { get; set; } = new();
-    public List<string> NSRecords { get; set; } = [];
-    public List<RecordConfig> ARecords { get; set; } = [];
-    public List<RecordConfig> AAAARecords { get; set; } = [];
+    [YamlMember(Alias = "domain")]
+    public string? Domain { get; set; }
+    [YamlMember(Alias = "soa")]
+    public SOARecord? Soa { get; set; }
+    [YamlMember(Alias = "ns_records")]
+    public List<string>? NSRecords { get; set; } = [];
+    [YamlMember(Alias = "a_records")]
+    public List<ARecord>? ARecords { get; set; } = [];
+    [YamlMember(Alias = "aaaa_records")]
+    public List<AAAARecord>? AAAARecords { get; set; } = [];
 }
 
-public class SOAConfig
+public class SOARecord
 {
-    public string MName { get; set; } = string.Empty;
-    public string RName { get; set; } = string.Empty;
-    public uint Serial { get; set; } = 2024032801;
-    public uint Refresh { get; set; } = 3600;
-    public uint Retry { get; set; } = 1800;
-    public uint Expire { get; set; } = 604800;
-    public uint Minimum { get; set; } = 3600;
+    [YamlMember(Alias = "m_name")]
+    public string? MName { get; set; }
+    [YamlMember(Alias = "r_name")]
+    public string? RName { get; set; }
+    [YamlMember(Alias = "serial")]
+    public uint? Serial { get; set; }
+    [YamlMember(Alias = "refresh")]
+    public uint? Refresh { get; set; }
+    [YamlMember(Alias = "retry")]
+    public uint? Retry { get; set; }
+    [YamlMember(Alias = "expire")]
+    public uint? Expire { get; set; }
+    [YamlMember(Alias = "minimum")]
+    public uint? Minimum { get; set; }
 }
 
-public class RecordConfig
+public class ARecord
+{
+    [YamlMember(Alias = "name")]
+    public string? Name { get; set; }
     
+    [YamlMember(Alias = "value")]
+    public string? Value { get; set; }
+    
+    [YamlMember(Alias = "ttl")]
+    public uint TTL { get; set; } = 3600;
+}
+
+public class AAAARecord
 {
-    public string Name { get; set; } = string.Empty;
-    public string Value { get; set; } = string.Empty;
+    [YamlMember(Alias = "name")]
+    public string? Name { get; set; }
+    
+    [YamlMember(Alias = "value")]
+    public string? Value { get; set; }
+    
+    [YamlMember(Alias = "ttl")]
     public uint TTL { get; set; } = 3600;
 }
