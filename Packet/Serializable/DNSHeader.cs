@@ -87,7 +87,7 @@ public readonly struct DNSHeader : IDNSSerializable
         NoError = 0,
         FormatError = 1,
         ServerFailed = 2,
-        DomainNotExist = 3,
+        DomainDoesNotExist = 3,
         NotImplemented = 4,
         Refused = 5,
         DomainExist = 6,

@@ -2,7 +2,7 @@
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-
+using System.Text.Json.Serialization;
 using DNS.Packet;
 using DNS.Packet.Enum;
 using DNS.Packet.Serializable;
@@ -20,37 +20,47 @@ public class DNSServer : IDisposable
     #region Constants
 
     private const string ConfigPath = "config.yaml";
+    
+    private static JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = 
+        { 
+            new DNSPacketJsonConverter(),
+            new JsonStringEnumConverter() 
+        }
+    };
 
     #endregion
-    
+
     #region Fields
-    
-    private bool _disposed = false;
+
+    private bool _disposed;
     private readonly ManualResetEventSlim _shutdownEvent = new(false);
-    
+
     private readonly SimpleRecordHolder<string, DNSResourceRecord> _records = new();
     private readonly HashSet<string> _authoritativeZones = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _cts = new();
-    
+
     private readonly ILog _logger = LogManager.GetLogger(typeof(DNSServer));
     private readonly Task? _listenerTask;
     private UdpClient? _udpClient;
-    
+
     private readonly Lock _configLock = new();
-    
+
     #endregion
 
     #region Constructors
-        
+
     public DNSServer(int port)
     {
         SetupHandlers();
         LoadConfig();
-        
+
         _listenerTask = Task.Run(() => ListenAsync(port));
     }
-        
+
     #endregion
 
     #region Handlers
@@ -61,7 +71,7 @@ public class DNSServer : IDisposable
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
             !RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-            ) 
+           )
             return;
         PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnPosixSignal);
         PosixSignalRegistration.Create(PosixSignal.SIGHUP, OnPosixSignal);
@@ -70,7 +80,7 @@ public class DNSServer : IDisposable
     private void OnConsoleCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
     {
         e.Cancel = true;
-        Console.WriteLine("Received SIGINT. Shutting down gracefully...");
+        _logger.Info("Received SIGINT. Shutting down gracefully...");
         Dispose();
     }
 
@@ -80,11 +90,11 @@ public class DNSServer : IDisposable
         switch (context.Signal)
         {
             case PosixSignal.SIGHUP:
-                Console.WriteLine("Received SIGHUP - reloading YAML configuration...");
+                _logger.Info("Received SIGHUP. Reloading YAML configuration...");
                 LoadConfig();
                 return;
             default:
-                Console.WriteLine($"Received {context.Signal}. Shutting down gracefully...");
+                _logger.Info($"Received {context.Signal}. Shutting down gracefully...");
                 Dispose();
                 break;
         }
@@ -108,15 +118,15 @@ public class DNSServer : IDisposable
                     .Build();
 
                 var yaml = File.ReadAllText(ConfigPath);
-                
+
                 var config = deserializer.Deserialize<DNSConfig?>(yaml);
-                
+
                 if (config?.Zones is null || config.Zones.Count == 0)
                 {
                     _logger.Warn("No zones found in YAML configuration - server will be empty.");
                     return;
                 }
-                
+
                 var zones = config.Zones!;
 
                 foreach (var zone in zones)
@@ -139,26 +149,9 @@ public class DNSServer : IDisposable
                         continue;
                     }
 
+                    if (!TryLoadSOA(zone.Domain!, zone.Soa!)) continue;
+                    
                     _authoritativeZones.Add(zone.Domain);
-
-                    _records.Add(
-                        zone.Domain,
-                        new DNSResourceRecord(
-                            zone.Domain!,
-                            DNSType.SOA,
-                            DNSClass.IN,
-                            zone.Soa!.Minimum!.Value,
-                            DNSHelper.CreateSOARData(
-                                zone.Soa!.MName!,
-                                zone.Soa!.RName!,
-                                zone.Soa!.Serial!.Value,
-                                zone.Soa!.Refresh!.Value,
-                                zone.Soa!.Retry!.Value,
-                                zone.Soa!.Expire!.Value,
-                                zone.Soa!.Minimum!.Value
-                            )
-                        )
-                    );
 
                     _records.AddRange(
                         zone.Domain,
@@ -192,7 +185,60 @@ public class DNSServer : IDisposable
             }
         }
     }
+    
+    // ReSharper disable once InconsistentNaming
+    private bool TryLoadSOA(string domain, SOARecord record)
+    {
+        if (record.Serial is null)
+        {
+            _logger.Warn(
+                $"While parsing zone {domain}, encountered SOA record without serial, skipping");
+            return false;
+        }
 
+        if (record.Refresh is null)
+        {
+            _logger.Warn(
+                $"While parsing zone {domain}, encountered SOA record without refresh, skipping");
+            return false;
+        }
+        
+        if (record.Retry is null)
+        {
+            _logger.Warn(
+                $"While parsing zone {domain}, encountered SOA record without retry, skipping");
+            return false;
+        }
+        
+        if (record.Minimum is null)
+        {
+            _logger.Warn(
+                $"While parsing zone {domain}, encountered SOA record without minimum, skipping");
+            return false;
+        }
+        
+        _records.Add(
+            domain,
+            new DNSResourceRecord(
+                domain,
+                DNSType.SOA,
+                DNSClass.IN,
+                record.Minimum!.Value,
+                DNSHelper.CreateSOARData(
+                    record.MName ?? string.Empty,
+                    record.RName ?? string.Empty,
+                    record.Serial!.Value,
+                    record.Refresh!.Value,
+                    record.Retry!.Value,
+                    record.Expire ?? 0,
+                    record.Minimum!.Value
+                )
+            )
+        );
+        return true;
+    }
+
+    // ReSharper disable once InconsistentNaming    
     private int LoadARecords(string domain, IEnumerable<ARecord> records)
     {
         var loaded = 0;
@@ -316,19 +362,20 @@ public class DNSServer : IDisposable
                 {
                     break;
                 }
-                catch (SocketException ex) when (ex.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
+                catch (SocketException e) 
+                    when (e.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
                 {
                     break;
                 }
-                catch (Exception ex)
+                catch (Exception e)
                 {
-                    await Console.Error.WriteLineAsync($"Failed to listen: {ex.Message}");
+                    _logger.Error("Encountered unexpected error while listening", e);
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            await Console.Error.WriteLineAsync($"Failed to listen: {ex.Message}");
+            _logger.Error("Failed to establish udp client", e);
         }
         finally
         {
@@ -353,16 +400,10 @@ public class DNSServer : IDisposable
 
             var question = query.Questions[0];
 
-            var isInZone = false;
-            
-            lock (_configLock)
-            {
-                isInZone = _authoritativeZones.Any(
-                    zone => 
-                        question.Name.Equals(zone, StringComparison.OrdinalIgnoreCase) || 
-                        question.Name.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase)
-                );
-            }
+            var isInZone = _authoritativeZones.Any(zone =>
+                question.Name.Equals(zone, StringComparison.OrdinalIgnoreCase) ||
+                question.Name.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase)
+            );
             
             if (!isInZone)
             {
@@ -374,7 +415,7 @@ public class DNSServer : IDisposable
 
                 if (nameRecords.Count == 0)
                 {
-                    builder.SetResponseCode(DNSHeader.ResponseCode.DomainNotExist);
+                    builder.SetResponseCode(DNSHeader.ResponseCode.DomainDoesNotExist);
                 } 
                 else 
                 { 
@@ -408,7 +449,7 @@ public class DNSServer : IDisposable
                 response,
             };
             
-            _logger.Info($"Processed: {JsonSerializer.Serialize(json)}");
+            _logger.Info($"Processed: {JsonSerializer.Serialize(json, _jsonOptions)}");
         }
         catch (Exception ex)
         {
