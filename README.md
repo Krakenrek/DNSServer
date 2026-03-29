@@ -40,13 +40,13 @@ dotnet build
 zones:
   - domain: example.com
     soa:
-	    m_name: ns1.example.com
-	    r_name: admin.example.com
-	    serial: 2026032801
-	    refresh: 3600
-	    retry: 1800
-	    expire: 604800
-	    minimum: 3600
+  	    m_name: ns1.example.com
+  	    r_name: admin.example.com
+  	    serial: 2026032801
+  	    refresh: 3600
+  	    retry: 1800
+  	    expire: 604800
+  	    minimum: 3600
     ns_records:
       - ns1.example.com
     a_records:
