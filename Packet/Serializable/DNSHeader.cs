@@ -16,22 +16,22 @@ public static class DNSHeaderExtensions
         
         public ushort Set(ushort flags)
         {
-            return (ushort)(Mask(flag) | flags);
+            return (ushort)(flags | Mask(flag));
         }
         
         public ushort Clear(ushort flags)
         {
-            return (ushort)(Mask(flag) & ~flags);
+            return (ushort)(flags & ~Mask(flag));
         }
     }
 
     private static ushort Mask(DNSHeader.Flag flag) => flag switch
     {
         DNSHeader.Flag.Response => 1 << 15,
-        DNSHeader.Flag.Authoritative => 1 << 11,
-        DNSHeader.Flag.Truncated => 1 << 10,
-        DNSHeader.Flag.RecursionDesired => 1 << 9,
-        DNSHeader.Flag.RecursionAvailable => 1 << 8,
+        DNSHeader.Flag.Authoritative => 1 << 10,
+        DNSHeader.Flag.Truncated => 1 << 9,
+        DNSHeader.Flag.RecursionDesired => 1 << 8,
+        DNSHeader.Flag.RecursionAvailable => 1 << 7,
         _ => 0
     };
 

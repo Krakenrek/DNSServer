@@ -7,7 +7,7 @@ namespace DNS.Packet;
 // ReSharper disable once InconsistentNaming
 public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
 {
-    public override DNSPacket? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override DNSPacket Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartObject) throw new JsonException();
 

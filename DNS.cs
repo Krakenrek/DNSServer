@@ -21,7 +21,7 @@ public class DNSServer : IDisposable
 
     private const string ConfigPath = "config.yaml";
     
-    private static JsonSerializerOptions _jsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         Converters = 
@@ -38,16 +38,15 @@ public class DNSServer : IDisposable
     private bool _disposed;
     private readonly ManualResetEventSlim _shutdownEvent = new(false);
 
+    private readonly Lock _configLock = new();
     private readonly SimpleRecordHolder<string, DNSResourceRecord> _records = new();
     private readonly HashSet<string> _authoritativeZones = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _cts = new();
-
-    private readonly ILog _logger = LogManager.GetLogger(typeof(DNSServer));
-    private readonly Task? _listenerTask;
     private UdpClient? _udpClient;
-
-    private readonly Lock _configLock = new();
+    private readonly Task? _listenerTask;
+    
+    private readonly ILog _logger = LogManager.GetLogger(typeof(DNSServer));
 
     #endregion
 
@@ -262,7 +261,7 @@ public class DNSServer : IDisposable
             var name = DNSHelper.GetFullQName(record.Name!, domain);
 
             if (!IPAddress.TryParse(record.Value!, out var address) ||
-                address!.AddressFamily != AddressFamily.InterNetwork
+                address.AddressFamily != AddressFamily.InterNetwork
                )
             {
                 _logger.Warn(
@@ -311,7 +310,7 @@ public class DNSServer : IDisposable
             var name = DNSHelper.GetFullQName(record.Name!, domain);
 
             if (!IPAddress.TryParse(record.Value!, out var address) ||
-                address!.AddressFamily != AddressFamily.InterNetworkV6
+                address.AddressFamily != AddressFamily.InterNetworkV6
                )
             {
                 _logger.Warn(
@@ -369,17 +368,17 @@ public class DNSServer : IDisposable
                 }
                 catch (Exception e)
                 {
-                    _logger.Error("Encountered unexpected error while listening", e);
+                    _logger.Fatal("Encountered unexpected error while listening", e);
                 }
             }
         }
         catch (Exception e)
         {
-            _logger.Error("Failed to establish udp client", e);
+            _logger.Fatal("Failed to establish udp client", e);
         }
         finally
         {
-            _udpClient?.Dispose();
+            Dispose();
         }
     }
 
@@ -444,12 +443,12 @@ public class DNSServer : IDisposable
 
             var json = new
             {
-                remoteEndPoint,
+                remoteEndPoint = remoteEndPoint.ToString(),
                 query,
-                response,
+                responsePacket,
             };
             
-            _logger.Info($"Processed: {JsonSerializer.Serialize(json, _jsonOptions)}");
+            _logger.Info($"Processed: {JsonSerializer.Serialize(json, JsonOptions)}");
         }
         catch (Exception ex)
         {
@@ -472,7 +471,7 @@ public class DNSServer : IDisposable
 
         _disposed = true;
 
-        const int listenThreadTimeout = 2000;
+        const int listenThreadTimeout = 1000;
 
         GC.SuppressFinalize(this);
         _cts.Cancel();
