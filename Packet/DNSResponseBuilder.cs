@@ -3,11 +3,21 @@ using DNS.Packet.Serializable;
 
 namespace DNS.Packet;
 
+/// <summary>
+/// Simple Builder for DNS responses.
+/// </summary>
 public class DNSResponseBuilder
 {
     #region Properties
 
+    /// <summary>
+    /// Gets ID of header.
+    /// </summary>
     private ushort Id { get; set; }
+    
+    /// <summary>
+    /// Gets Flags of header.
+    /// </summary>
     private ushort Flags { get; set; }
 
     private List<DNSQuestion> Questions { get; } = [];

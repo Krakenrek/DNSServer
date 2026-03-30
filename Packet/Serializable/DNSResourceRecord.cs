@@ -3,21 +3,46 @@ using DNS.Packet.Enum;
 
 namespace DNS.Packet.Serializable;
 
+/// <summary>
+/// Represents the general record of DNS packet.
+/// </summary>
 public readonly struct DNSResourceRecord : IDNSSerializable
 {
     #region Properties
 
+    /// <summary>
+    /// Gets the record name.
+    /// </summary>
     public string Name { get; init; }
+    /// <summary>
+    /// Gets the record type.
+    /// </summary>
     public DNSType Type { get; init; }
+    /// <summary>
+    /// Gets the record class.
+    /// </summary>
     public DNSClass Class { get; init; }
     
+    /// <summary>
+    /// Gets the record ttl.
+    /// </summary>
     public uint TTL { get; init; }
+    
+    /// <summary>
+    /// Gets the record data.
+    /// </summary>
     public byte[] Data { get; init; }
 
     #endregion
 
     #region Constructors
 
+    /// <summary>
+    /// Initializes a new instance of the DNSResourceRecord struct by parsing raw DNS packet data.
+    /// </summary>
+    /// <param name="raw">Raw byte representation.</param>
+    /// <param name="offset">Offset from star of representation.</param>
+    /// <exception cref="DnsParseException">Throws when can't read all fields properly.</exception>
     public DNSResourceRecord(ReadOnlySpan<byte> raw, ref int offset)
     {
         var originalOffset = offset;
@@ -67,6 +92,14 @@ public readonly struct DNSResourceRecord : IDNSSerializable
         offset += dataLength;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the DNSPacket struct with explicit values.
+    /// </summary>
+    /// <param name="name">Record name.</param>
+    /// <param name="type">Record type.</param>
+    /// <param name="cls">Record class.</param>
+    /// <param name="ttl">Record ttl.</param>
+    /// <param name="data">Record data.</param>
     public DNSResourceRecord(string name, DNSType type, DNSClass cls, uint ttl, byte[] data)
     {
         Name = name;

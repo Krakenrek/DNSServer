@@ -2,17 +2,42 @@ using DNS.Packet.Enum;
 
 namespace DNS.Packet.Serializable;
 
+/// <summary>
+/// Represents the DNS packet.
+/// </summary>
 public class DNSPacket : IDNSSerializable
 {
     #region Properties
     
+    /// <summary>
+    /// Header of packet.
+    /// </summary>
     public DNSHeader Header { get; set; }
 
+    /// <summary>
+    /// Array of questions records.
+    /// </summary>
     public DNSQuestion[] Questions { get; }
+    
+    /// <summary>
+    /// Array of answers records.
+    /// </summary>
     public DNSResourceRecord[] Answers { get; }
+    
+    /// <summary>
+    /// Array of authority records.
+    /// </summary>
     public DNSResourceRecord[] Authority { get; }
+    
+    /// <summary>
+    /// Array of additional records.
+    /// </summary>
     public DNSResourceRecord[] Additional { get; }
-
+    
+    /// <summary>
+    /// Retrieves max possible response packet size.
+    /// Checks EDSN0 record.
+    /// </summary>
     public ushort MaxPacketSize
     {
         get
@@ -25,11 +50,15 @@ public class DNSPacket : IDNSSerializable
         }
     }
     
-
     #endregion
 
     #region Constructors
 
+    /// <summary>
+    /// Initializes a new instance of the DNSPacket class by parsing raw DNS packet data.
+    /// </summary>
+    /// <param name="raw">Raw byte representation.</param>
+    /// <exception cref="DnsParseException">Throws when can't read all fields properly.</exception>
     public DNSPacket(ReadOnlySpan<byte> raw)
     {
         var offset = 0;
@@ -54,6 +83,14 @@ public class DNSPacket : IDNSSerializable
             Additional[i] = new DNSResourceRecord(raw, ref offset);
     }
 
+    /// <summary>
+    /// Initializes a new instance of the DNSPacket class with explicit values.
+    /// </summary>
+    /// <param name="header">Header.</param>
+    /// <param name="questions">Questions records.</param>
+    /// <param name="answers">Answers records.</param>
+    /// <param name="authority">Authority records.</param>
+    /// <param name="additional">Additional records</param>
     public DNSPacket(
         DNSHeader header,
         IEnumerable<DNSQuestion> questions,

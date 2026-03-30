@@ -3,18 +3,36 @@ using DNS.Packet.Enum;
 
 namespace DNS.Packet.Serializable;
 
+/// <summary>
+/// Represents the Questions record of DNS packet.
+/// </summary>
 public readonly struct DNSQuestion : IDNSSerializable
 {
     #region Properties
 
+    /// <summary>
+    /// Gets the record name of the question.
+    /// </summary>
     public string Name { get; init; }
+    /// <summary>
+    /// Gets the record type of the question.
+    /// </summary>
     public DNSType Type { get; init; }
+    /// <summary>
+    /// Gets the record class of the questions.
+    /// </summary>
     public DNSClass Class { get; init; }
 
     #endregion
 
     #region Constructors
 
+    /// <summary>
+    /// Initializes a new instance of the DNSQuestion struct by parsing raw DNS packet data.
+    /// </summary>
+    /// <param name="raw">Raw byte representation.</param>
+    /// <param name="offset">Offset from star of representation.</param>
+    /// <exception cref="DnsParseException">Throws when can't read all fields properly.</exception>
     public DNSQuestion(ReadOnlySpan<byte> raw, ref int offset)
     {
         var originalOffset = offset;

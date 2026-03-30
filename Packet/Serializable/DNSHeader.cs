@@ -267,11 +267,11 @@ public readonly struct DNSHeader : IDNSSerializable
     #region Constructors
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DNSHeader"/> struct by parsing raw DNS packet data.
+    /// Initializes a new instance of the DNSHeader struct by parsing raw DNS packet data.
     /// </summary>
-    /// <param name="raw">The raw byte span containing the DNS packet.</param>
-    /// <param name="offset">The current offset into the span. This value is updated after reading the header.</param>
-    /// <exception cref="ArgumentException">Thrown when the provided data is shorter than 12 bytes.</exception>
+    /// <param name="raw">Raw byte representation.</param>
+    /// <param name="offset">Offset from star of representation.</param>
+    /// <exception cref="DnsParseException">Throws when can't read all fields properly</exception>
     public DNSHeader(ReadOnlySpan<byte> raw, ref int offset)
     {
         if (raw.Length < 12)
@@ -292,7 +292,7 @@ public readonly struct DNSHeader : IDNSSerializable
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DNSHeader"/> struct with explicit values.
+    /// Initializes a new instance of the DNSHeader struct with explicit values.
     /// </summary>
     /// <param name="id">The DNS transaction identifier.</param>
     /// <param name="flags">The raw 16-bit flags value.</param>
@@ -344,7 +344,7 @@ public readonly struct DNSHeader : IDNSSerializable
     #endregion
 
     #region Serialization
-
+    
     public void Serialize(Span<byte> buffer, ref int offset, Dictionary<string, int>? compressionTable = null)
     {
         BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..(offset + 2)], Id);

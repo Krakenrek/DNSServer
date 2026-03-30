@@ -5,13 +5,25 @@ namespace DNS.Packet;
 using System;
 using System.Text;
 
+/// <summary>
+/// Holder of DNS helper functions.
+/// </summary>
 public static class DNSHelper
 {
     #region Static Methods
 
+    /// <summary>
+    /// Parses the qname from rae representation.
+    /// Updates offset.
+    /// </summary>
+    /// <param name="raw">Raw representation of name.</param>
+    /// <param name="offset">Offset from raw data start.</param>
+    /// <returns>Parsed name.</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown when raw representation is broken (achieved OOB).</exception>
+    /// <exception cref="Exception">Thrown when cycle is encountered (too many jumps).</exception>
     public static string ParseName(ReadOnlySpan<byte> raw, ref int offset)
     {
-        const int jumpThreshold = 10;
+        const int jumpThreshold = 25;
         const int ptrMarker = 0xC0;
         const int ptrOffsetMask = 0x3F;
 
@@ -69,6 +81,16 @@ public static class DNSHelper
         return nameBuilder.ToString().TrimEnd('.');
     }
 
+    /// <summary>
+    /// Writes qname to given buffer
+    /// Updates offset.
+    /// Populates compression table.
+    /// </summary>
+    /// <param name="buffer">The buffer.</param>
+    /// <param name="name">String to write.</param>
+    /// <param name="offset">Offset from buffer start.</param>
+    /// <param name="compressionTable">Suffix table for compression.</param>
+    /// <exception cref="ArgumentException">Thrown when couldn't convert.</exception>
     public static void WriteName(Span<byte> buffer, string name, ref int offset,
         Dictionary<string, int>? compressionTable = null)
     {
@@ -124,6 +146,15 @@ public static class DNSHelper
         buffer[offset++] = 0;
     }
 
+    /// <summary>
+    /// Get qname byte representation length in bytes.
+    /// Populates compression table.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <param name="compressionTable">Suffix table for compression.</param>
+    /// <param name="startingOffset">Offset from string start.</param>
+    /// <returns>Length of the byte representation of given string,</returns>
+    /// <exception cref="ArgumentException">Thrown when name is too long.</exception>
     public static int GetNameLength(string name, Dictionary<string, int>? compressionTable = null,
         int startingOffset = 0)
     {
@@ -159,6 +190,17 @@ public static class DNSHelper
         return totalLength + 1;
     }
 
+    /// <summary>
+    /// Generates SOA data.
+    /// </summary>
+    /// <param name="mName">MName.</param>
+    /// <param name="rName">RName.</param>
+    /// <param name="serial">Serial.</param>
+    /// <param name="refresh">Refresh.</param>
+    /// <param name="retry">Retry.</param>
+    /// <param name="expire">Expire.</param>
+    /// <param name="minimum">Minimum.</param>
+    /// <returns>SOA data.</returns>
     public static byte[] CreateSOAData(
         string mName,
         string rName,
@@ -189,6 +231,11 @@ public static class DNSHelper
         return result;
     }
 
+    /// <summary>
+    /// Generates name data.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <returns>Data of the given name.</returns>
     public static byte[] CreateNameRData(string name)
     {
         const int maxNameLength = 256;
@@ -206,6 +253,12 @@ public static class DNSHelper
         return result;
     }
 
+    /// <summary>
+    /// Get full qname.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <param name="zoneDomain">The domain.</param>
+    /// <returns>Full qname.</returns>
     public static string GetFullQName(string name, string zoneDomain)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Equals(zoneDomain, StringComparison.OrdinalIgnoreCase))

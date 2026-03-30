@@ -15,6 +15,9 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace DNS;
 
+/// <summary>
+/// A lightweight, authoritative DNS server implementation.
+/// </summary>
 public class DNSServer : IDisposable
 {
     #region Constants
@@ -107,12 +110,18 @@ public class DNSServer : IDisposable
 
     #region Configuration
 
+    /// <summary>
+    /// Reads the 'config.yaml' file and populates the internal record cache.
+    /// This method, I think, is thread-safe.
+    /// </summary>
     private void LoadConfig()
     {
         lock (_configLock)
         {
+            //Clearing current records
             _records.Clear();
             _authoritativeZones.Clear();
+            _soaRecords.Clear();
 
             try
             {
@@ -124,6 +133,7 @@ public class DNSServer : IDisposable
 
                 var config = deserializer.Deserialize<DNSConfig?>(yaml);
 
+                //Validation: Ensure the zone has a domain, SOA, and Name Servers
                 if (config?.Zones is null || config.Zones.Count == 0)
                 {
                     _logger.Warn("No zones found in YAML configuration - server will be empty.");
@@ -134,24 +144,16 @@ public class DNSServer : IDisposable
 
                 foreach (var zone in zones)
                 {
-                    if (string.IsNullOrWhiteSpace(zone.Domain))
+                    if (string.IsNullOrWhiteSpace(zone.Domain) || 
+                        zone.Soa is null ||
+                        (zone.NSRecords?.Count ?? 0) == 0
+                        )
                     {
-                        _logger.Warn("While parsing config encountered zone without domain, skipping");
+                        _logger.Warn($"Skipping incomplete zone definition for {zone.Domain ?? "Unknown"}...");
                         continue;
                     }
 
-                    if (zone.Soa is null)
-                    {
-                        _logger.Warn("While parsing config encountered zone without SOA record, skipping");
-                        continue;
-                    }
-
-                    if (zone.NSRecords is null || zone.NSRecords!.Count == 0)
-                    {
-                        _logger.Warn("While parsing config encountered zone without NS records, skipping");
-                        continue;
-                    }
-
+                    // Attempt to load the SOA record
                     if (!TryLoadSOA(zone.Domain!, zone.Soa!)) continue;
 
                     _authoritativeZones.Add(zone.Domain);
@@ -171,13 +173,12 @@ public class DNSServer : IDisposable
                             )
                     );
                     
-                    var aRecordsLoaded = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
-                    
-                    var aaaaRecordsLoaded =
+                    // Bulk load A and IPv6 AAAA records
+                    var aCount = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
+                    var aaaaCount =
                         LoadAAAARecords(zone.Domain, zone.AAAARecords ?? Enumerable.Empty<AAAARecord>());
 
-                    _logger.Info(
-                        $"Successfully loaded zone {zone.Domain} with {aRecordsLoaded} A records and {aaaaRecordsLoaded} AAAA records.");
+                    _logger.Info($"Zone {zone.Domain} loaded: {aCount} A, {aaaaCount} AAAA records.");
                 }
             }
             catch (FileNotFoundException)
@@ -186,39 +187,24 @@ public class DNSServer : IDisposable
             }
             catch (Exception e)
             {
-                _logger.Error("Encountered unexpected error while loading zones", e);
+                _logger.Error("Critical failure during configuration loading", e);
             }
         }
     }
-
-    // ReSharper disable once InconsistentNaming
+    
+    /// <summary>
+    /// Validates and converts a YAML SOA definition into a binary DNS Resource Record.
+    /// </summary>
     private bool TryLoadSOA(string domain, SOARecord record)
     {
-        if (record.Serial is null)
+        if (record.Serial is null || 
+            record.Refresh is null || 
+            record.Retry is null ||
+            record.Minimum is null
+            ) 
         {
             _logger.Warn(
-                $"While parsing zone {domain}, encountered SOA record without serial, skipping");
-            return false;
-        }
-
-        if (record.Refresh is null)
-        {
-            _logger.Warn(
-                $"While parsing zone {domain}, encountered SOA record without refresh, skipping");
-            return false;
-        }
-
-        if (record.Retry is null)
-        {
-            _logger.Warn(
-                $"While parsing zone {domain}, encountered SOA record without retry, skipping");
-            return false;
-        }
-
-        if (record.Minimum is null)
-        {
-            _logger.Warn(
-                $"While parsing zone {domain}, encountered SOA record without minimum, skipping");
+                $"While parsing zone {domain}, encountered incomplete SOA record skipping...");
             return false;
         }
 
@@ -247,8 +233,13 @@ public class DNSServer : IDisposable
 
         return true;
     }
-
-    // ReSharper disable once InconsistentNaming    
+    
+    /// <summary>
+    /// Bulk load A records in internal storage.
+    /// </summary>
+    /// <param name="domain">Domain where to load records.</param>
+    /// <param name="records">Records to load.</param>
+    /// <returns>Count of successfully loaded records.</returns>
     private int LoadARecords(string domain, IEnumerable<ARecord> records)
     {
         var loaded = 0;
@@ -296,8 +287,13 @@ public class DNSServer : IDisposable
 
         return loaded;
     }
-
-    // ReSharper disable once InconsistentNaming
+    
+    /// <summary>
+    /// Bulk load AAAA records in internal storage.
+    /// </summary>
+    /// <param name="domain">Domain where to load records.</param>
+    /// <param name="records">Records to load.</param>
+    /// <returns>Count of successfully loaded records.</returns>
     private int LoadAAAARecords(string domain, IEnumerable<AAAARecord> records)
     {
         var loaded = 0;
@@ -350,6 +346,11 @@ public class DNSServer : IDisposable
 
     #region Listening
 
+    /// <summary>
+    /// Starts listening UDP traffic on given port.
+    /// Proceeds to process retrieved packets asynchronously.
+    /// </summary>
+    /// <param name="port">Port to listen.</param>
     private async Task ListenAsync(int port)
     {
         try
@@ -391,6 +392,11 @@ public class DNSServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Process given UDP packets and send response to provided endpoint.
+    /// </summary>
+    /// <param name="remoteEndPoint">Endpoint to send to.</param>
+    /// <param name="queryData">Raw byte representation of UDP packet.</param>
     private void ProcessQuery(IPEndPoint remoteEndPoint, byte[] queryData)
     {
         DNSPacket query;
@@ -406,18 +412,21 @@ public class DNSServer : IDisposable
 
             do
             {
+                //Not query -> Not Implemented
                 if (query.Header.OpCode != DNSHeader.OperationCode.Query)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.NotImplemented);
                     break;
                 }
-
+                
+                //Without questions -> Empty Response + NoError
                 if (query.Questions.Length == 0)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
                     break;
                 }
 
+                //Ignore queries with multiple questions
                 if (query.Questions.Length > 1)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.FormatError);
@@ -433,6 +442,7 @@ public class DNSServer : IDisposable
 
                 var isInZone = zone is not null;
 
+                // Not in zone -> Refuse
                 if (!isInZone)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
@@ -441,6 +451,7 @@ public class DNSServer : IDisposable
 
                 var nameRecords = _records[question.Name];
 
+                //No records -> Not Existing Domain + SOA Record
                 if (nameRecords.Count == 0)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.DomainDoesNotExist);
@@ -449,6 +460,7 @@ public class DNSServer : IDisposable
                     break;
                 }
 
+                //No satisfying answers -> Empty Response + NoError
                 var answers = nameRecords.Where(record => record.Type == question.Type);
 
                 builder.AddAnswers(answers);
@@ -464,6 +476,7 @@ public class DNSServer : IDisposable
         }
         catch (DnsParseException e) when (e.Context != DnsParseException.ParseContext.Question)
         {
+            //Can't parse -> Format Error
             builder = DNSResponseBuilder.fromOnlyHeader(queryData.AsSpan());
             query = builder.Build();
             builder.SetAuthoritative()
@@ -472,6 +485,7 @@ public class DNSServer : IDisposable
         }
         catch (Exception e)
         {
+            //Something terrible happened
             _logger.Error("Encountered unexpected error while processing query, not sending response", e);
             return;
         }
@@ -479,20 +493,24 @@ public class DNSServer : IDisposable
         var response = builder.Build();
 
         Dictionary<string, int> compressionTable = new(StringComparer.OrdinalIgnoreCase);
-
+        
+        //Allocate sufficient buffer on stack
         Span<byte> buffer = stackalloc byte[response.GetSize(compressionTable)];
 
+        //Set truncate if exceed
         if (buffer.Length > response.MaxPacketSize)
         {
             builder.SetTruncated();
             response = builder.Build();
         }
 
+        //Reset buffer, for propper compression in serializing.
         compressionTable.Clear();
 
         var offset = 0;
         response.Serialize(buffer, ref offset, compressionTable);
 
+        //Resize
         var responseSize = Math.Min(buffer.Length, response.MaxPacketSize);
         var responseData = new byte[responseSize];
 
@@ -514,6 +532,7 @@ public class DNSServer : IDisposable
         }
         catch (Exception ex)
         {
+            //Maybe this should be FATAL
             _logger.Error("Error sending response packet", ex);
         }
     }
@@ -522,11 +541,19 @@ public class DNSServer : IDisposable
 
     #region Shutdown
 
+    /// <summary>
+    /// Makes current Thread sleep until server goes down
+    /// </summary>
     public void WaitForShutdown()
     {
         _shutdownEvent.Wait();
     }
 
+    /// <summary>
+    /// Disposes instances.
+    /// Frees all allocated resources.
+    /// Stops listen thread.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;

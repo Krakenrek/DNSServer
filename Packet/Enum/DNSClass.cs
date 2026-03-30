@@ -5,5 +5,8 @@ namespace DNS.Packet.Enum;
 /// </summary>
 public enum DNSClass : ushort
 {
+    /// <summary>
+    /// Ethernet
+    /// </summary>
     IN = 1
 }

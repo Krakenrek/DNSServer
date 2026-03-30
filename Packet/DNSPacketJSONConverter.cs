@@ -6,7 +6,9 @@ namespace DNS.Packet;
 
 public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
 {
-    public override DNSPacket Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    #region Methods
+
+     public override DNSPacket Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartObject) throw new JsonException();
 
@@ -30,19 +32,19 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
                     break;
                 case "Questions":
                     questions = JsonSerializer.Deserialize<List<DNSQuestion>>(ref reader, options) ??
-                                new List<DNSQuestion>();
+                                [];
                     break;
                 case "Answers":
                     answers = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
-                              new List<DNSResourceRecord>();
+                              [];
                     break;
                 case "Authority":
                     authority = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
-                                new List<DNSResourceRecord>();
+                                [];
                     break;
                 case "Additional":
                     additional = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
-                                 new List<DNSResourceRecord>();
+                                 [];
                     break;
             }
         }
@@ -71,6 +73,10 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
 
         writer.WriteEndObject();
     }
+    
+    #endregion
+
+    #region Static Methods
 
     private static void SerializeHeader(Utf8JsonWriter writer, DNSHeader header, JsonSerializerOptions options)
     {
@@ -91,4 +97,6 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
         writer.WriteNumber("AdditionalCount", header.AdditionalCount);
         writer.WriteEndObject();
     }
+
+    #endregion
 }
