@@ -9,12 +9,9 @@ namespace DNS.Config.Record;
 
 public class AAAARecord
 {
-    [YamlMember(Alias = "name")]
-    public string? Name { get; set; }
-    
-    [YamlMember(Alias = "value")]
-    public string? Value { get; set; }
-    
-    [YamlMember(Alias = "ttl")]
-    public uint TTL { get; set; } = 3600;
+    [YamlMember(Alias = "name")] public string? Name { get; set; }
+
+    [YamlMember(Alias = "value")] public string? Value { get; set; }
+
+    [YamlMember(Alias = "ttl")] public uint TTL { get; set; } = 3600;
 }

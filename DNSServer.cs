@@ -3,34 +3,31 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-
 using DNS.Packet;
 using DNS.Packet.Enum;
 using DNS.Packet.Serializable;
 using DNS.Storage;
 using DNS.Config;
 using DNS.Config.Record;
-
 using log4net;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
 namespace DNS;
 
-// ReSharper disable once InconsistentNaming
 public class DNSServer : IDisposable
 {
     #region Constants
 
     private const string ConfigPath = "config.yaml";
-    
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Converters = 
-        { 
+        Converters =
+        {
             new DNSPacketJsonConverter(),
-            new JsonStringEnumConverter() 
+            new JsonStringEnumConverter()
         }
     };
 
@@ -43,12 +40,16 @@ public class DNSServer : IDisposable
 
     private readonly Lock _configLock = new();
     private readonly SimpleRecordHolder<string, DNSResourceRecord> _records = new();
+
     private readonly HashSet<string> _authoritativeZones = new(StringComparer.OrdinalIgnoreCase);
+
+    //TODO: Rework
+    private readonly Dictionary<string, DNSResourceRecord> _soaRecords = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _cts = new();
     private UdpClient? _udpClient;
     private readonly Task? _listenerTask;
-    
+
     private readonly ILog _logger = LogManager.GetLogger(typeof(DNSServer));
 
     #endregion
@@ -169,19 +170,17 @@ public class DNSServer : IDisposable
                                 )
                             )
                     );
-
-                    // ReSharper disable once InconsistentNaming
-                    var ARecordsLoaded = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
-
-                    // ReSharper disable once InconsistentNaming
-                    var AAAARecordsLoaded =
+                    
+                    var aRecordsLoaded = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
+                    
+                    var aaaaRecordsLoaded =
                         LoadAAAARecords(zone.Domain, zone.AAAARecords ?? Enumerable.Empty<AAAARecord>());
 
                     _logger.Info(
-                        $"Successfully loaded zone {zone.Domain} with {ARecordsLoaded} A records and {AAAARecordsLoaded} AAAA records.");
+                        $"Successfully loaded zone {zone.Domain} with {aRecordsLoaded} A records and {aaaaRecordsLoaded} AAAA records.");
                 }
             }
-            catch (FileNotFoundException e)
+            catch (FileNotFoundException)
             {
                 _logger.Warn("No configuration file found in YAML configuration - server will be empty.");
             }
@@ -191,7 +190,7 @@ public class DNSServer : IDisposable
             }
         }
     }
-    
+
     // ReSharper disable once InconsistentNaming
     private bool TryLoadSOA(string domain, SOARecord record)
     {
@@ -208,39 +207,44 @@ public class DNSServer : IDisposable
                 $"While parsing zone {domain}, encountered SOA record without refresh, skipping");
             return false;
         }
-        
+
         if (record.Retry is null)
         {
             _logger.Warn(
                 $"While parsing zone {domain}, encountered SOA record without retry, skipping");
             return false;
         }
-        
+
         if (record.Minimum is null)
         {
             _logger.Warn(
                 $"While parsing zone {domain}, encountered SOA record without minimum, skipping");
             return false;
         }
-        
-        _records.Add(
+
+        var soa = new DNSResourceRecord(
             domain,
-            new DNSResourceRecord(
-                domain,
-                DNSType.SOA,
-                DNSClass.IN,
-                record.Minimum!.Value,
-                DNSHelper.CreateSOARData(
-                    record.MName ?? string.Empty,
-                    record.RName ?? string.Empty,
-                    record.Serial!.Value,
-                    record.Refresh!.Value,
-                    record.Retry!.Value,
-                    record.Expire ?? 0,
-                    record.Minimum!.Value
-                )
+            DNSType.SOA,
+            DNSClass.IN,
+            record.Minimum!.Value,
+            DNSHelper.CreateSOAData(
+                record.MName ?? string.Empty,
+                record.RName ?? string.Empty,
+                record.Serial!.Value,
+                record.Refresh!.Value,
+                record.Retry!.Value,
+                record.Expire ?? 0,
+                record.Minimum!.Value
             )
         );
+
+        _records.Add(
+            domain,
+            soa
+        );
+
+        _soaRecords[domain] = soa;
+
         return true;
     }
 
@@ -248,7 +252,7 @@ public class DNSServer : IDisposable
     private int LoadARecords(string domain, IEnumerable<ARecord> records)
     {
         var loaded = 0;
-        
+
         foreach (var record in records)
         {
             if (record.Name is null)
@@ -286,18 +290,18 @@ public class DNSServer : IDisposable
                     address.GetAddressBytes()
                 )
             );
-            
+
             loaded++;
         }
-        
+
         return loaded;
     }
-    
+
     // ReSharper disable once InconsistentNaming
     private int LoadAAAARecords(string domain, IEnumerable<AAAARecord> records)
     {
         var loaded = 0;
-        
+
         foreach (var record in records)
         {
             if (record.Name is null)
@@ -335,10 +339,10 @@ public class DNSServer : IDisposable
                     address.GetAddressBytes()
                 )
             );
-            
+
             loaded++;
         }
-        
+
         return loaded;
     }
 
@@ -347,13 +351,12 @@ public class DNSServer : IDisposable
     #region Listening
 
     private async Task ListenAsync(int port)
-    { 
+    {
         try
         {
             _udpClient = new UdpClient(port);
-            
+
             while (!_cts.Token.IsCancellationRequested)
-            {
                 try
                 {
                     var result = await _udpClient.ReceiveAsync();
@@ -368,7 +371,7 @@ public class DNSServer : IDisposable
                 {
                     break;
                 }
-                catch (SocketException e) 
+                catch (SocketException e)
                     when (e.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
                 {
                     break;
@@ -377,7 +380,6 @@ public class DNSServer : IDisposable
                 {
                     _logger.Fatal("Encountered unexpected error while listening", e);
                 }
-            }
         }
         catch (Exception e)
         {
@@ -391,10 +393,7 @@ public class DNSServer : IDisposable
 
     private void ProcessQuery(IPEndPoint remoteEndPoint, byte[] queryData)
     {
-        const int maxPacketSize = 4096;
-
-        DNSPacket query, response;
-
+        DNSPacket query;
         DNSResponseBuilder builder;
 
         try
@@ -404,7 +403,7 @@ public class DNSServer : IDisposable
             builder = new DNSResponseBuilder(query)
                 .SetAuthoritative()
                 .SetRecursionAvailable(false);
-            
+
             do
             {
                 if (query.Header.OpCode != DNSHeader.OperationCode.Query)
@@ -424,16 +423,16 @@ public class DNSServer : IDisposable
                     builder.SetResponseCode(DNSHeader.ResponseCode.FormatError);
                     break;
                 }
-                
+
                 var question = query.Questions[0];
 
-                var zone = _authoritativeZones.FirstOrDefault(z => 
+                var zone = _authoritativeZones.FirstOrDefault(z =>
                     question.Name.Equals(z, StringComparison.OrdinalIgnoreCase) ||
                     question.Name.EndsWith("." + z, StringComparison.OrdinalIgnoreCase)
                 );
 
                 var isInZone = zone is not null;
-            
+
                 if (!isInZone)
                 {
                     builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
@@ -443,16 +442,17 @@ public class DNSServer : IDisposable
                 var nameRecords = _records[question.Name];
 
                 if (nameRecords.Count == 0)
-                { 
+                {
                     builder.SetResponseCode(DNSHeader.ResponseCode.DomainDoesNotExist);
-                    builder.AddAuthority(_records[zone!].First(record => record.Type == DNSType.SOA));
+                    var unwrapped = zone!;
+                    builder.AddAuthority(_soaRecords[unwrapped]);
                     break;
                 }
-                
+
                 var answers = nameRecords.Where(record => record.Type == question.Type);
-                
-                builder.AddAnswers(answers);          
-                
+
+                builder.AddAnswers(answers);
+
                 builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
             } while (false);
         }
@@ -473,29 +473,31 @@ public class DNSServer : IDisposable
         catch (Exception e)
         {
             _logger.Error("Encountered unexpected error while processing query, not sending response", e);
-            return;            
+            return;
         }
 
-        response = builder.Build();
-        
-        Dictionary<string, int> compressionTable = new();
-        
+        var response = builder.Build();
+
+        Dictionary<string, int> compressionTable = new(StringComparer.OrdinalIgnoreCase);
+
         Span<byte> buffer = stackalloc byte[response.GetSize(compressionTable)];
 
-        if (buffer.Length > maxPacketSize)
+        if (buffer.Length > response.MaxPacketSize)
         {
             builder.SetTruncated();
             response = builder.Build();
         }
-        
+
+        compressionTable.Clear();
+
         var offset = 0;
         response.Serialize(buffer, ref offset, compressionTable);
 
-        var responseSize = Math.Min(buffer.Length, maxPacketSize);
+        var responseSize = Math.Min(buffer.Length, response.MaxPacketSize);
         var responseData = new byte[responseSize];
-        
+
         buffer[..responseSize].CopyTo(responseData);
-        
+
         try
         {
             _udpClient?.Send(responseData, offset, remoteEndPoint);
@@ -505,9 +507,9 @@ public class DNSServer : IDisposable
                 timestamp = DateTimeOffset.UtcNow,
                 remoteEndPoint = remoteEndPoint.ToString(),
                 query,
-                response,
+                response
             };
-            
+
             _logger.Info($"Processed: {JsonSerializer.Serialize(json, JsonOptions)}");
         }
         catch (Exception ex)
@@ -524,7 +526,7 @@ public class DNSServer : IDisposable
     {
         _shutdownEvent.Wait();
     }
-    
+
     public void Dispose()
     {
         if (_disposed) return;

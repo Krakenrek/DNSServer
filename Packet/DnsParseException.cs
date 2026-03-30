@@ -1,6 +1,7 @@
 namespace DNS.Packet;
 
-public class DnsParseException(DnsParseException.ParseContext context, string field, string message) : Exception(message)
+public class DnsParseException(DnsParseException.ParseContext context, string field, string message)
+    : Exception(message)
 {
     public enum ParseContext
     {
@@ -10,6 +11,6 @@ public class DnsParseException(DnsParseException.ParseContext context, string fi
     }
 
     public string FailedField { get; } = field;
-    
+
     public ParseContext Context { get; } = context;
 }
