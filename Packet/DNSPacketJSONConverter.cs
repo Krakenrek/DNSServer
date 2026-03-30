@@ -4,7 +4,6 @@ using DNS.Packet.Serializable;
 
 namespace DNS.Packet;
 
-// ReSharper disable once InconsistentNaming
 public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
 {
     public override DNSPacket Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -30,16 +29,20 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
                     header = JsonSerializer.Deserialize<DNSHeader>(ref reader, options);
                     break;
                 case "Questions":
-                    questions = JsonSerializer.Deserialize<List<DNSQuestion>>(ref reader, options) ?? new();
+                    questions = JsonSerializer.Deserialize<List<DNSQuestion>>(ref reader, options) ??
+                                new List<DNSQuestion>();
                     break;
                 case "Answers":
-                    answers = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ?? new();
+                    answers = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
+                              new List<DNSResourceRecord>();
                     break;
                 case "Authority":
-                    authority = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ?? new();
+                    authority = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
+                                new List<DNSResourceRecord>();
                     break;
                 case "Additional":
-                    additional = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ?? new();
+                    additional = JsonSerializer.Deserialize<List<DNSResourceRecord>>(ref reader, options) ??
+                                 new List<DNSResourceRecord>();
                     break;
             }
         }
@@ -50,7 +53,7 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
     public override void Write(Utf8JsonWriter writer, DNSPacket value, JsonSerializerOptions options)
     {
         writer.WriteStartObject();
-        
+
         writer.WritePropertyName("Header");
         SerializeHeader(writer, value.Header, options);
 
@@ -74,12 +77,12 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
         writer.WriteStartObject();
         writer.WriteNumber("Id", header.Id);
         writer.WriteNumber("Flags", header.Flags);
-        
+
         writer.WriteBoolean("IsResponse", header.IsResponse);
         writer.WriteString("OpCode", header.OpCode.ToString());
         writer.WriteBoolean("IsAuthoritative", header.IsAuthoritative);
-        writer.WriteBoolean("RecursionDesired", header.RecursionDesired);
-        writer.WriteBoolean("RecursionAvailable", header.RecursionAvailable);
+        writer.WriteBoolean("RecursionDesired", header.IsRecursionDesired);
+        writer.WriteBoolean("RecursionAvailable", header.IsRecursionAvailable);
         writer.WriteString("ResponseCode", header.RCode.ToString());
 
         writer.WriteNumber("QuestionCount", header.QuestionCount);

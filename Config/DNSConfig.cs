@@ -9,10 +9,5 @@ namespace DNS.Config;
 
 public class DNSConfig
 {
-    [YamlMember(Alias = "zones")]
-    public List<DNSZone>? Zones { get; set; } = [];
+    [YamlMember(Alias = "zones")] public List<DNSZone>? Zones { get; set; } = [];
 }
-
-
-
-
