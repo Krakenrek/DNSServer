@@ -43,13 +43,13 @@ dotnet build
 zones:
   - domain: example.com
     soa:
-  	    m_name: ns1.example.com
-  	    r_name: admin.example.com
-  	    serial: 2026032801
-  	    refresh: 3600
-  	    retry: 1800
-  	    expire: 604800
-  	    minimum: 3600
+      m_name: ns1.example.com
+      r_name: admin.example.com
+      serial: 2026032801
+      refresh: 3600
+      retry: 1800
+      expire: 604800
+      minimum: 3600
     ns_records:
       - ns1.example.com
     a_records:
@@ -149,6 +149,7 @@ DNSServer/
 │       ├── ARecord.cs             # Конфигурация A записи
 │       └── SOARecord.cs           # Конфигурация SOA записи
 ├── Packet/
+│   ├── DnsParseException.cs       # Кастомный тип исключения для парсинга
 │   ├── DNSHelper.cs               # Класс вспомогательных функций для работы с пакетами
 │   ├── DNSPacketJSONConverter.cs  # Преобразователь DNS-пакетов в JSON
 │   ├── DNSResponseBuilder.cs      # Строитель DNS-ответов
@@ -156,7 +157,7 @@ DNSServer/
 │   │   ├── DNSClass.cs            # Перечисление классов записей
 │   │   └── DNSType.cs             # Перечисление типов записей
 │   └── Serializable/
-│       ├── DNSHeader.cs           # Заголово DNS-пакета
+│       ├── DNSHeader.cs           # Заголовок DNS-пакета
 │       ├── DNSPacket.cs           # DNS-пакет
 │       ├── DNSQuestion.cs         # DNS-вопрос
 │       ├── DNSResourceRecord.cs   # Ресурная запись
@@ -173,6 +174,6 @@ DNSServer/
 - Только авторитативный режим.
 - Поддерживаются только A, AAAA, SOA, NS записи.
 - Только UDP.
-- Нет EDNS0, Dynamic Updates.
+- Нет Dynamic Updates.
 - Единый файл конфигурации.
 - Нет автоматической элевации привелегий.
