@@ -152,7 +152,7 @@ public class DNSServer : IDisposable
                     }
 
                     if (!TryLoadSOA(zone.Domain!, zone.Soa!)) continue;
-                    
+
                     _authoritativeZones.Add(zone.Domain);
 
                     _records.AddRange(
@@ -180,6 +180,10 @@ public class DNSServer : IDisposable
                     _logger.Info(
                         $"Successfully loaded zone {zone.Domain} with {ARecordsLoaded} A records and {AAAARecordsLoaded} AAAA records.");
                 }
+            }
+            catch (FileNotFoundException e)
+            {
+                _logger.Warn("No configuration file found in YAML configuration - server will be empty.");
             }
             catch (Exception e)
             {
@@ -385,77 +389,130 @@ public class DNSServer : IDisposable
         }
     }
 
-    private void ProcessQuery(IPEndPoint remoteEndPoint, byte[] data)
+    private void ProcessQuery(IPEndPoint remoteEndPoint, byte[] queryData)
     {
         const int maxPacketSize = 4096;
-        
+
+        DNSPacket query, response;
+
+        DNSResponseBuilder builder;
+
         try
         {
-            var query = new DNSPacket(data.AsSpan());
+            query = new DNSPacket(queryData.AsSpan());
 
-            if (query.Questions.Length == 0)
-                return;
-
-            var builder = new DNSResponseBuilder(query)
+            builder = new DNSResponseBuilder(query)
                 .SetAuthoritative()
                 .SetRecursionAvailable(false);
-
-            var question = query.Questions[0];
-
-            var isInZone = _authoritativeZones.Any(zone =>
-                question.Name.Equals(zone, StringComparison.OrdinalIgnoreCase) ||
-                question.Name.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase)
-            );
             
-            if (!isInZone)
+            do
             {
-                builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
-            }
-            else
-            {
+                if (query.Header.OpCode != DNSHeader.OperationCode.Query)
+                {
+                    builder.SetResponseCode(DNSHeader.ResponseCode.NotImplemented);
+                    break;
+                }
+
+                if (query.Questions.Length == 0)
+                {
+                    builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
+                    break;
+                }
+
+                if (query.Questions.Length > 1)
+                {
+                    builder.SetResponseCode(DNSHeader.ResponseCode.FormatError);
+                    break;
+                }
+                
+                var question = query.Questions[0];
+
+                var zone = _authoritativeZones.FirstOrDefault(z => 
+                    question.Name.Equals(z, StringComparison.OrdinalIgnoreCase) ||
+                    question.Name.EndsWith("." + z, StringComparison.OrdinalIgnoreCase)
+                );
+
+                var isInZone = zone is not null;
+            
+                if (!isInZone)
+                {
+                    builder.SetResponseCode(DNSHeader.ResponseCode.Refused);
+                    break;
+                }
+
                 var nameRecords = _records[question.Name];
 
                 if (nameRecords.Count == 0)
-                {
-                    builder.SetResponseCode(DNSHeader.ResponseCode.DomainDoesNotExist);
-                } 
-                else 
                 { 
-                    builder.AddAnswers(
-                        from record in nameRecords 
-                        where record.Type == question.Type 
-                        select record
-                    );              
-                
-                    builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
+                    builder.SetResponseCode(DNSHeader.ResponseCode.DomainDoesNotExist);
+                    builder.AddAuthority(_records[zone!].First(record => record.Type == DNSType.SOA));
+                    break;
                 }
-            }
-            
-            var responsePacket = builder.Build();
-            
-            Span<byte> buffer = stackalloc byte[maxPacketSize];
-            
-            var offset = 0;
-            
-            responsePacket.Serialize(buffer, ref offset);
+                
+                var answers = nameRecords.Where(record => record.Type == question.Type);
+                
+                builder.AddAnswers(answers);          
+                
+                builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
+            } while (false);
+        }
+        catch (DnsParseException e) when (e.Context == DnsParseException.ParseContext.Header)
+        {
+            //Seems like garbage
+            _logger.Warn("Encountered garbage instead of DNSHeader");
+            return;
+        }
+        catch (DnsParseException e) when (e.Context != DnsParseException.ParseContext.Question)
+        {
+            builder = DNSResponseBuilder.fromOnlyHeader(queryData.AsSpan());
+            query = builder.Build();
+            builder.SetAuthoritative()
+                .SetRecursionAvailable(false)
+                .SetResponseCode(DNSHeader.ResponseCode.FormatError);
+        }
+        catch (Exception e)
+        {
+            _logger.Error("Encountered unexpected error while processing query, not sending response", e);
+            return;            
+        }
 
-            var response = new byte[offset];
-            buffer[..offset].CopyTo(response);
-            
-            _udpClient?.Send(response, offset, remoteEndPoint);
+        response = builder.Build();
+        
+        Dictionary<string, int> compressionTable = new();
+        
+        Span<byte> buffer = stackalloc byte[response.GetSize(compressionTable)];
+
+        if (buffer.Length > maxPacketSize)
+        {
+            builder.SetTruncated();
+            response = builder.Build();
+        }
+        
+        var offset = 0;
+        response.Serialize(buffer, ref offset, compressionTable);
+
+        var responseSize = Math.Min(buffer.Length, maxPacketSize);
+        var responseData = new byte[responseSize];
+        
+        buffer[..responseSize].CopyTo(responseData);
+        
+        try
+        {
+            _udpClient?.Send(responseData, offset, remoteEndPoint);
 
             var json = new
             {
+                timestamp = DateTimeOffset.UtcNow,
                 remoteEndPoint = remoteEndPoint.ToString(),
                 query,
-                responsePacket,
+                response,
             };
             
             _logger.Info($"Processed: {JsonSerializer.Serialize(json, JsonOptions)}");
         }
         catch (Exception ex)
         {
-            _logger.Error($"Error processing packet: {ex.Message}", ex);
+            _logger.Error("Error sending response packet", ex);
         }
     }
 

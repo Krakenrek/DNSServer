@@ -20,9 +20,6 @@ public class DNSPacket : IDNSSerializable
     
     public DNSPacket(ReadOnlySpan<byte> raw)
     {
-        if (raw.Length < 12)
-            throw new ArgumentException("DNS packet must be at least 12 bytes.");
-
         var offset = 0;
         
         Header = new DNSHeader(raw, ref offset);
@@ -63,21 +60,31 @@ public class DNSPacket : IDNSSerializable
 
     #region Serialization
     
-    public void Serialize(Span<byte> buffer, ref int offset)
+    public void Serialize(Span<byte> buffer, ref int offset, Dictionary<string, int>? compressionTable = null)
     {
-        Header.Serialize(buffer, ref offset);
+        Header.Serialize(buffer, ref offset, compressionTable);
         
         foreach (var question in Questions) 
-            question.Serialize(buffer, ref offset);
+            question.Serialize(buffer, ref offset, compressionTable);
         foreach (var answer in Answers)
-            answer.Serialize(buffer, ref offset);
+            answer.Serialize(buffer, ref offset, compressionTable);
         foreach (var authority in Authority)
-            authority.Serialize(buffer, ref offset);
+            authority.Serialize(buffer, ref offset, compressionTable);
         foreach (var additional in Additional)
-            additional.Serialize(buffer, ref offset);
+            additional.Serialize(buffer, ref offset, compressionTable);
+    }
+
+    public int GetSize(Dictionary<string, int>? compressionTable = null)
+    {
+        var result = Header.GetSize();
+        
+        result += Questions.Select(record => record.GetSize(compressionTable)).Sum();
+        result += Answers.Select(record => record.GetSize(compressionTable)).Sum();
+        result += Authority.Select(record => record.GetSize(compressionTable)).Sum();
+        result += Additional.Select(record => record.GetSize(compressionTable)).Sum();
+        
+        return result; 
     }
 
     #endregion
-
-
 }

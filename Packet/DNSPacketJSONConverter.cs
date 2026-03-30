@@ -78,8 +78,8 @@ public class DNSPacketJsonConverter : JsonConverter<DNSPacket>
         writer.WriteBoolean("IsResponse", header.IsResponse);
         writer.WriteString("OpCode", header.OpCode.ToString());
         writer.WriteBoolean("IsAuthoritative", header.IsAuthoritative);
-        writer.WriteBoolean("RecursionDesired", header.RecursionDesired);
-        writer.WriteBoolean("RecursionAvailable", header.RecursionAvailable);
+        writer.WriteBoolean("RecursionDesired", header.IsRecursionDesired);
+        writer.WriteBoolean("RecursionAvailable", header.IsRecursionAvailable);
         writer.WriteString("ResponseCode", header.RCode.ToString());
 
         writer.WriteNumber("QuestionCount", header.QuestionCount);
