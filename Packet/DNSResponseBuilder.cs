@@ -35,7 +35,7 @@ public class DNSResponseBuilder
         Flags = DNSHeader.Flag.Response.Set(query.Header.Flags);
 
         Questions.AddRange(query.Questions);
-        AddEDNSIfPresent(query);
+        //AddEDNSIfPresent(query);
     }
 
     public DNSResponseBuilder(DNSHeader header)

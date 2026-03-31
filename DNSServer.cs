@@ -1,8 +1,10 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Buffers.Binary;
 using DNS.Packet;
 using DNS.Packet.Enum;
 using DNS.Packet.Serializable;
@@ -173,12 +175,22 @@ public class DNSServer : IDisposable
                             )
                     );
                     
-                    // Bulk load A and IPv6 AAAA records
+                    // Bulk load records
                     var aCount = LoadARecords(zone.Domain, zone.ARecords ?? Enumerable.Empty<ARecord>());
                     var aaaaCount =
                         LoadAAAARecords(zone.Domain, zone.AAAARecords ?? Enumerable.Empty<AAAARecord>());
+                    var cnameCount = LoadCNameRecords(zone.Domain, zone.CNameRecords ?? Enumerable.Empty<CNameRecord>());
+                    var mxCount = LoadMXRecords(zone.Domain, zone.MXRecords ?? Enumerable.Empty<MXRecord>());
+                    var txtCount = LoadTXTRecords(zone.Domain, zone.TXTRecords ?? Enumerable.Empty<TXTRecord>());
 
-                    _logger.Info($"Zone {zone.Domain} loaded: {aCount} A, {aaaaCount} AAAA records.");
+                    _logger.Info($"""
+                    Zone {zone.Domain} loaded with:
+                    {aCount} A records
+                    {aaaaCount} AAAA records
+                    {cnameCount} CNAME records
+                    {mxCount} MX records
+                    {txtCount} TXT records
+                    """);
                 }
             }
             catch (FileNotFoundException)
@@ -279,6 +291,162 @@ public class DNSServer : IDisposable
                     DNSClass.IN,
                     record.TTL,
                     address.GetAddressBytes()
+                )
+            );
+
+            loaded++;
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// Bulk load CNAME records in internal storage.
+    /// </summary>
+    /// <param name="domain">Domain where to load records.</param>
+    /// <param name="records">Records to load.</param>
+    /// <returns>Count of successfully loaded records.</returns>
+    private int LoadCNameRecords(string domain, IEnumerable<CNameRecord> records)
+    {
+        var loaded = 0;
+
+        foreach (var record in records)
+        {
+            if (record.Name is null)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered CNAME record without name, skipping");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(record.Value))
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered CNAME record without value, skipping");
+                continue;
+            }
+
+            var name = DNSHelper.GetFullQName(record.Name!, domain);
+
+            var value = DNSHelper.GetFullQName(record.Value!, domain);
+
+            var data = new byte[DNSHelper.GetNameLength(value)];
+
+            DNSHelper.WriteName(data, value);
+
+            _records.Add(
+                name,
+                new DNSResourceRecord(
+                    name,
+                    DNSType.CNAME,
+                    DNSClass.IN,
+                    record.TTL,
+                    data
+                )
+            );
+
+            loaded++;
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// Bulk load MX records in internal storage.
+    /// </summary>
+    /// <param name="domain">Domain where to load records.</param>
+    /// <param name="records">Records to load.</param>
+    /// <returns>Count of successfully loaded records.</returns>
+    private int LoadMXRecords(string domain, IEnumerable<MXRecord> records)
+    {
+        var loaded = 0;
+
+        foreach (var record in records)
+        {
+            if (record.Name is null)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered MX record without name, skipping");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(record.Value))
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered MX record without value, skipping");
+                continue;
+            }
+
+            var name = DNSHelper.GetFullQName(record.Name!, domain);
+
+            var value = DNSHelper.GetFullQName(record.Value!, domain);
+
+            var data = new byte[DNSHelper.GetNameLength(value) + 2];
+
+            BinaryPrimitives.WriteInt16BigEndian(data[0..2], record.Priority ?? 0);  
+
+            var offset = 2;
+            DNSHelper.WriteName(data, value, ref offset);;
+
+            _records.Add(
+                name,
+                new DNSResourceRecord(
+                    name,
+                    DNSType.MX,
+                    DNSClass.IN,
+                    record.TTL,
+                    data
+                )
+            );
+
+            loaded++;
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// Bulk load TXT records in internal storage.
+    /// </summary>
+    /// <param name="domain">Domain where to load records.</param>
+    /// <param name="records">Records to load.</param>
+    /// <returns>Count of successfully loaded records.</returns>
+    private int LoadTXTRecords(string domain, IEnumerable<TXTRecord> records)
+    {
+        var loaded = 0;
+
+        foreach (var record in records)
+        {
+            if (record.Name is null)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered TXT record without name, skipping");
+                continue;
+            }
+
+            if (record.Value is not null && record.Value.Length > 255)
+            {
+                _logger.Warn(
+                    $"While parsing zone {domain}, encountered TXT record with very long value, skipping");
+                continue;
+            }
+
+            var name = DNSHelper.GetFullQName(record.Name!, domain);
+
+            var raw = Encoding.ASCII.GetBytes(record.Value ?? "");
+
+            var data = new byte[raw.Length + 1];
+            data[0] = (byte) raw.Length;
+            for (int i = 0; i < raw.Length; i++) data[i + 1] = raw[i];
+
+            _records.Add(
+                name,
+                new DNSResourceRecord(
+                    name,
+                    DNSType.TXT,
+                    DNSClass.IN,
+                    record.TTL,
+                    data
                 )
             );
 
@@ -461,13 +629,16 @@ public class DNSServer : IDisposable
                 }
 
                 //No satisfying answers -> Empty Response + NoError
-                var answers = nameRecords.Where(record => record.Type == question.Type);
+                var answers = nameRecords.Where(record => 
+                    record.Type == question.Type || 
+                    record.Type == DNSType.CNAME
+                );
 
                 builder.AddAnswerRange(answers);
 
                 // Forgot about it
                 var ns = _records[zone!].Where(record => record.Type == DNSType.NS).ToArray();
-                
+            
                 builder.AddAuthorityRange(ns);
 
                 builder.AddAdditionalRange(
@@ -488,7 +659,7 @@ public class DNSServer : IDisposable
             _logger.Warn("Encountered garbage instead of DNSHeader");
             return;
         }
-        catch (DnsParseException e) when (e.Context != DnsParseException.ParseContext.Question)
+        catch (DnsParseException e) when (e.Context != DnsParseException.ParseContext.Header)
         {
             //Can't parse -> Format Error
             builder = DNSResponseBuilder.fromOnlyHeader(queryData.AsSpan());

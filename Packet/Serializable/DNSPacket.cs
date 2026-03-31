@@ -125,7 +125,7 @@ public class DNSPacket : IDNSSerializable
 
     public int GetSize(Dictionary<string, int>? compressionTable = null)
     {
-        var result = Header.GetSize();
+        var result = Header.GetSize(compressionTable);
 
         result += Questions.Select(record => record.GetSize(compressionTable)).Sum();
         result += Answers.Select(record => record.GetSize(compressionTable)).Sum();

@@ -14,9 +14,21 @@ public enum DNSType : ushort
     /// </summary>
     NS = 2,
     /// <summary>
+    /// Canonical name record.
+    /// </summary>
+    CNAME = 5,
+    /// <summary>
     /// State of authority record.
     /// </summary>
     SOA = 6,
+    /// <summary>
+    /// Mail exchange record.
+    /// </summary>
+    MX = 15,
+    /// <summary>
+    /// Text record.
+    /// </summary>
+    TXT = 16,
     /// <summary>
     /// Record for IPv6
     /// </summary>
@@ -24,5 +36,5 @@ public enum DNSType : ushort
     /// <summary>
     /// EDNS0 Record.
     /// </summary>
-    OPT = 41
+    OPT = 41,
 }

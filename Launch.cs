@@ -7,7 +7,7 @@ BasicConfigurator.Configure();
 
 //Create instance of DNSServer.
 //This starts background listen thread
-var server = new DNSServer(53);
+var server = new DNSServer(54);
 
 //Lock main thread, so that our program will
 //continue to listen to packets in background

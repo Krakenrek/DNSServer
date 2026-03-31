@@ -73,7 +73,7 @@ public readonly struct DNSQuestion : IDNSSerializable
 
     public void Serialize(Span<byte> buffer, ref int offset, Dictionary<string, int>? compressionTable = null)
     {
-        DNSHelper.WriteName(buffer, Name, ref offset);
+        DNSHelper.WriteName(buffer, Name, ref offset, compressionTable);
 
         BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..(offset + 2)], (ushort)Type);
         BinaryPrimitives.WriteUInt16BigEndian(buffer[(offset + 2)..(offset + 4)], (ushort)Class);

@@ -23,6 +23,12 @@ public static class DNSHelper
         var offset = 0;
         return ParseName(raw, ref offset);
     }
+
+    public static void WriteName(Span<byte> buffer, string str)
+    {
+        var offset = 0;
+        WriteName(buffer, str, ref offset);
+    }
     
     /// <summary>
     /// Parses the qname from rae representation.
@@ -132,7 +138,7 @@ public static class DNSHelper
                     if (offset + 2 > buffer.Length)
                         throw new ArgumentException("Insufficient space for pointer.");
 
-                    var pointer = (ushort)(pointerPrefix | (ushort)knownOffset);
+                    var pointer = (ushort)(pointerPrefix | (ushort) knownOffset);
                     buffer[offset++] = (byte)(pointer >> 8);
                     buffer[offset++] = (byte)(pointer & 0xFF);
                     return;

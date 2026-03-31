@@ -19,4 +19,10 @@ public class DNSZone
     [YamlMember(Alias = "a_records")] public List<ARecord>? ARecords { get; set; } = [];
 
     [YamlMember(Alias = "aaaa_records")] public List<AAAARecord>? AAAARecords { get; set; } = [];
+
+    [YamlMember(Alias = "cname_records")] public List<CNameRecord>? CNameRecords { get; set; } = [];
+
+    [YamlMember(Alias = "mx_records")] public List<MXRecord>? MXRecords { get; set; } = [];
+
+    [YamlMember(Alias = "txt_records")] public List<TXTRecord>? TXTRecords { get; set; } = [];
 }
