@@ -17,6 +17,18 @@ public static class DNSHelper
     /// Updates offset.
     /// </summary>
     /// <param name="raw">Raw representation of name.</param>
+    /// <returns></returns>
+    public static string ParseName(ReadOnlySpan<byte> raw)
+    {
+        var offset = 0;
+        return ParseName(raw, ref offset);
+    }
+    
+    /// <summary>
+    /// Parses the qname from rae representation.
+    /// Updates offset.
+    /// </summary>
+    /// <param name="raw">Raw representation of name.</param>
     /// <param name="offset">Offset from raw data start.</param>
     /// <returns>Parsed name.</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when raw representation is broken (achieved OOB).</exception>

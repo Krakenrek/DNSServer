@@ -118,7 +118,7 @@ public class DNSResponseBuilder
         return this;
     }
 
-    public DNSResponseBuilder AddAnswers(IEnumerable<DNSResourceRecord> answers)
+    public DNSResponseBuilder AddAnswerRange(IEnumerable<DNSResourceRecord> answers)
     {
         Answers.AddRange(answers);
         return this;
@@ -130,7 +130,7 @@ public class DNSResponseBuilder
         return this;
     }
 
-    public DNSResponseBuilder AddAuthorities(IEnumerable<DNSResourceRecord> authorities)
+    public DNSResponseBuilder AddAuthorityRange(IEnumerable<DNSResourceRecord> authorities)
     {
         Authority.AddRange(authorities);
         return this;
@@ -142,7 +142,7 @@ public class DNSResponseBuilder
         return this;
     }
 
-    public DNSResponseBuilder AddAdditional(IEnumerable<DNSResourceRecord> additional)
+    public DNSResponseBuilder AddAdditionalRange(IEnumerable<DNSResourceRecord> additional)
     {
         Additional.AddRange(additional);
         return this;

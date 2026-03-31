@@ -463,7 +463,21 @@ public class DNSServer : IDisposable
                 //No satisfying answers -> Empty Response + NoError
                 var answers = nameRecords.Where(record => record.Type == question.Type);
 
-                builder.AddAnswers(answers);
+                builder.AddAnswerRange(answers);
+
+                // Forgot about it
+                var ns = _records[zone!].Where(record => record.Type == DNSType.NS).ToArray();
+                
+                builder.AddAuthorityRange(ns);
+
+                builder.AddAdditionalRange(
+                    ns.SelectMany(nsRecord =>
+                        _records[DNSHelper.ParseName(nsRecord.Data)]
+                            .Where(record =>
+                                record.Type is DNSType.A or DNSType.AAAA
+                            )
+                    )
+                );
 
                 builder.SetResponseCode(DNSHeader.ResponseCode.NoError);
             } while (false);
